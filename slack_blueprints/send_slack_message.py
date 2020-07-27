@@ -63,16 +63,16 @@ def get_args():
         required=True)
 
     args = parser.parse_args()
-    if args.destination_type == 'channel' and args.channel_name is None:
+    if args.destination_type == 'channel' and not args.channel_name:
         parser.error('--destination-type channel requires --channel-name')
-    elif args.destination_type == 'dm' and args.users_to_notify is None:
+    elif args.destination_type == 'dm' and args.users_to_notify:
         parser.error('--destination-type dm requires --users-to-notify')
 
-    if args.users_to_notify is not None and args.user_lookup_method is None:
+    if args.users_to_notify and not args.user_lookup_method:
         parser.error('--users-to-notify requires a --user-lookup-method')
 
     if args.file_upload == 'yes' and (
-            args.source_file_name_match_type is None or args.source_file_name is None):
+            not args.source_file_name_match_type or not args.source_file_name):
         parser.error(
             '--file-upload yes requires --source-file-name and --source-file-name-match-type')
 
@@ -459,7 +459,7 @@ def main():
 
     shipyard_link = create_shipyard_link()
     slack_connection = connect_to_slack()
-    if users_to_notify is not None:
+    if users_to_notify:
         user_id_list = create_user_id_list(
             slack_connection, users_to_notify, user_lookup_method)
     else:
