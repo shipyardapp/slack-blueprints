@@ -41,6 +41,15 @@ def get_args():
             'yes',
             'no'})
     parser.add_argument(
+        '--conditional-send',
+        dest='conditional_send',
+        default='always',
+        required=False,
+        choices={
+            'file_exists',
+            'file_dne',
+            'always'})
+    parser.add_argument(
         '--source-file-name-match-type',
         dest='source_file_name_match_type',
         default='exact_match',
@@ -331,6 +340,16 @@ def find_all_file_matches(file_names, file_name_re):
     return matching_file_names
 
 
+def clean_folder_name(folder_name):
+    """
+    Cleans folders name by removing duplicate '/' as well as leading and trailing '/' characters.
+    """
+    folder_name = folder_name.strip('/')
+    if folder_name != '':
+        folder_name = os.path.normpath(folder_name)
+    return folder_name
+
+
 def combine_folder_and_file_name(folder_name, file_name):
     """
     Combine together the provided folder_name and file_name into one path variable.
@@ -444,6 +463,39 @@ def send_slack_message_with_file(
             timestamp=timestamp)
 
 
+def should_message_be_sent(
+        conditional_send,
+        source_folder_name,
+        source_file_name,
+        source_file_name_match_type):
+    """
+    Determine if a slack message should be sent based on the parameters provided.
+    """
+
+    source_full_path = combine_folder_and_file_name(
+        source_folder_name, source_file_name)
+
+    if source_file_name_match_type == 'exact_match':
+        if (
+            conditional_send == 'file_exists' and os.path.exists(source_full_path)) or (
+            conditional_send == 'file_dne' and not os.path.exists(source_full_path)) or (
+                conditional_send == 'always'):
+            return True
+        else:
+            return False
+    if source_file_name_match_type == 'regex_match':
+        file_names = find_all_local_file_names(source_folder_name)
+        matching_file_names = find_all_file_matches(
+            file_names, re.compile(source_file_name))
+        if (
+            conditional_send == 'file_exists' and len(matching_file_names) > 0) or (
+                conditional_send == 'file_dne' and len(matching_file_names) == 0) or (
+                    conditional_send == 'always'):
+            return True
+        else:
+            return False
+
+
 def main():
     args = get_args()
     set_environment_variables(args)
@@ -454,51 +506,66 @@ def main():
     users_to_notify = args.users_to_notify
     file_upload = args.file_upload
     source_file_name = args.source_file_name
-    source_folder_name = args.source_folder_name
+    source_folder_name = clean_folder_name(args.source_folder_name)
+    source_full_path = combine_folder_and_file_name(
+        source_folder_name, source_file_name)
     source_file_name_match_type = args.source_file_name_match_type
 
-    shipyard_link = create_shipyard_link()
-    slack_connection = connect_to_slack()
-    if users_to_notify:
-        user_id_list = create_user_id_list(
-            slack_connection, users_to_notify, user_lookup_method)
-    else:
-        user_id_list = []
+    conditional_send = args.conditional_send
 
-    if destination_type == 'dm':
-        for user_id in user_id_list:
+    if should_message_be_sent(
+            conditional_send,
+            source_folder_name,
+            source_file_name,
+            source_file_name_match_type):
+        shipyard_link = create_shipyard_link()
+        slack_connection = connect_to_slack()
+        if users_to_notify:
+            user_id_list = create_user_id_list(
+                slack_connection, users_to_notify, user_lookup_method)
+        else:
+            user_id_list = []
+
+        if destination_type == 'dm':
+            for user_id in user_id_list:
+
+                if file_upload == 'yes':
+                    file_to_upload = determine_file_to_upload(
+                        source_file_name_match_type, source_folder_name, source_file_name)
+                    send_slack_message_with_file(
+                        slack_connection, message, user_id, shipyard_link, file_to_upload)
+                else:
+                    send_slack_message(
+                        slack_connection,
+                        message,
+                        user_id,
+                        create_blocks(
+                            message,
+                            shipyard_link))
+
+        else:
+            names_to_tag = create_name_tags(user_id_list)
+            message = names_to_tag + message
 
             if file_upload == 'yes':
                 file_to_upload = determine_file_to_upload(
                     source_file_name_match_type, source_folder_name, source_file_name)
                 send_slack_message_with_file(
-                    slack_connection, message, user_id, shipyard_link, file_to_upload)
-            else:
-                send_slack_message(
                     slack_connection,
                     message,
-                    user_id,
-                    create_blocks(
-                        message,
-                        shipyard_link))
-
+                    channel_name,
+                    shipyard_link,
+                    file_to_upload)
+            else:
+                message_response = send_slack_message(
+                    slack_connection, message, channel_name, create_blocks(
+                        message, shipyard_link))
     else:
-        names_to_tag = create_name_tags(user_id_list)
-        message = names_to_tag + message
-
-        if file_upload == 'yes':
-            file_to_upload = determine_file_to_upload(
-                source_file_name_match_type, source_folder_name, source_file_name)
-            send_slack_message_with_file(
-                slack_connection,
-                message,
-                channel_name,
-                shipyard_link,
-                file_to_upload)
-        else:
-            message_response = send_slack_message(
-                slack_connection, message, channel_name, create_blocks(
-                    message, shipyard_link))
+        if conditional_send == 'file_exists':
+            print('File(s) could not be found. Message not sent.')
+        if conditional_send == 'file_dne':
+            print(
+                'File(s) were found, but message was conditional based on file not existing. Message not sent.')
 
 
 if __name__ == '__main__':
