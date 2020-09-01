@@ -4,6 +4,7 @@ import time
 import argparse
 import glob
 import re
+import urllib.parse
 from zipfile import ZipFile
 
 
@@ -285,7 +286,9 @@ def create_shipyard_link():
     log_id = os.environ.get('SHIPYARD_LOG_ID')
 
     if project_id and vessel_id and log_id:
-        shipyard_link = f'https://app.shipyardapp.com/{org_name}/projects/{project_id}/vessels/{vessel_id}/logs/{log_id}'
+        dynamic_link_section = urllib.parse.quote(
+            f'{org_name}/projects/{project_id}/vessels/{vessel_id}/logs/{log_id}')
+        shipyard_link = f'https://app.shipyardapp.com/{dynamic_link_section}'
     else:
         shipyard_link = 'https://www.shipyardapp.com'
     return shipyard_link
