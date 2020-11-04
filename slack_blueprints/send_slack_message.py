@@ -75,7 +75,7 @@ def get_args():
     args = parser.parse_args()
     if args.destination_type == 'channel' and not args.channel_name:
         parser.error('--destination-type channel requires --channel-name')
-    elif args.destination_type == 'dm' and args.users_to_notify:
+    elif args.destination_type == 'dm' and not args.users_to_notify:
         parser.error('--destination-type dm requires --users-to-notify')
 
     if args.users_to_notify and not args.user_lookup_method:
