@@ -5,7 +5,10 @@ import argparse
 import glob
 import re
 import urllib.parse
+import pandas as pd
 from zipfile import ZipFile
+import subprocess
+
 
 
 def get_args():
@@ -224,7 +227,7 @@ def create_name_tags(user_id_list):
     return names_to_prepend
 
 
-def create_blocks(message, shipyard_link, download_link=''):
+def create_blocks(message, download_link=''):
     """
     Create blocks for the main message, a divider, and context that links to Shipyard.
     If a download link is provided, creates a button block to immediately start that download.
@@ -241,15 +244,6 @@ def create_blocks(message, shipyard_link, download_link=''):
     }
     divider_section = {
         "type": "divider"
-    }
-    context_section = {
-        "type": "context",
-        "elements": [
-                {
-                    "type": "mrkdwn",
-                    "text": f"Sent by Shipyard | <{shipyard_link}|Click Here to Edit>"
-                }
-        ]
     }
 
     if download_link != '':
@@ -269,9 +263,9 @@ def create_blocks(message, shipyard_link, download_link=''):
             ]
         }
         blocks = [message_section, download_section,
-                  divider_section, context_section]
+                  divider_section]
     else:
-        blocks = [message_section, divider_section, context_section]
+        blocks = [message_section, divider_section]
 
     return blocks
 
@@ -416,6 +410,8 @@ def determine_file_to_upload(
     return file_to_upload
 
 
+
+
 def send_slack_message_with_file(
         slack_connection,
         message,
@@ -434,8 +430,7 @@ def send_slack_message_with_file(
         message_with_file_status,
         channel,
         create_blocks(
-            message_with_file_status,
-            shipyard_link))
+            message_with_file_status))
     channel_id, timestamp = get_message_details(message_response)
     file_response = upload_file_to_slack(
         slack_connection,
@@ -450,8 +445,7 @@ def send_slack_message_with_file(
             channel_id=channel_id,
             blocks=create_blocks(
                 message,
-                download_link=download_link,
-                shipyard_link=shipyard_link),
+                download_link=download_link),
             timestamp=timestamp)
     else:
         message_with_file_status = message + \
@@ -461,8 +455,7 @@ def send_slack_message_with_file(
             message,
             channel_id=channel_id,
             blocks=create_blocks(
-                message_with_file_status,
-                shipyard_link=shipyard_link),
+                message_with_file_status),
             timestamp=timestamp)
 
 
@@ -483,8 +476,10 @@ def should_message_be_sent(
             conditional_send == 'file_exists' and os.path.exists(source_full_path)) or (
             conditional_send == 'file_dne' and not os.path.exists(source_full_path)) or (
                 conditional_send == 'always'):
+            print('send file true')    
             return True
         else:
+            print('send file false')    
             return False
     if source_file_name_match_type == 'regex_match':
         file_names = find_all_local_file_names(source_folder_name)
@@ -494,10 +489,19 @@ def should_message_be_sent(
             conditional_send == 'file_exists' and len(matching_file_names) > 0) or (
                 conditional_send == 'file_dne' and len(matching_file_names) == 0) or (
                     conditional_send == 'always'):
+            print('true')        
             return True
         else:
             return False
 
+def get_varibles_from_file(csv_file): 
+    df = pd.read_csv(csv_file)
+    df[['COMPANY_OWNER','ADMIN_URL','PARTNER_NAME']]
+    url_list_admin_url = df['ADMIN_URL']
+    url_list_partner = df['PARTNER_NAME']
+    url_list_company_owner = df['COMPANY_OWNER'].fillna('No Account owner')
+    url_list_str = '\n'.join(url_list_partner + ': ' + url_list_admin_url)
+    return url_list_str
 
 def main():
     args = get_args()
@@ -513,9 +517,14 @@ def main():
     source_full_path = combine_folder_and_file_name(
         source_folder_name, source_file_name)
     source_file_name_match_type = args.source_file_name_match_type
-
     conditional_send = args.conditional_send
-
+    message = args.message
+    if file_upload == 'yes':
+        orders_list = get_varibles_from_file(source_full_path)
+        message_arg = args.message
+        message = message_arg + "\n" + orders_list
+    else:
+        message = args.message
     if should_message_be_sent(
             conditional_send,
             source_folder_name,
@@ -543,8 +552,7 @@ def main():
                         message,
                         user_id,
                         create_blocks(
-                            message,
-                            shipyard_link))
+                            message))
 
         else:
             names_to_tag = create_name_tags(user_id_list)
@@ -562,7 +570,7 @@ def main():
             else:
                 message_response = send_slack_message(
                     slack_connection, message, channel_name, create_blocks(
-                        message, shipyard_link))
+                        message))
     else:
         if conditional_send == 'file_exists':
             print('File(s) could not be found. Message not sent.')
