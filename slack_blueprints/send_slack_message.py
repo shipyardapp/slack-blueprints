@@ -105,7 +105,8 @@ def connect_to_slack():
     Create a connection to Slack, using a "Bot User OAuth Access Token"
     stored under an environment variable of SLACK_BOT_TOKEN
     """
-    slack_connection = WebClient(os.environ.get('SLACK_BOT_TOKEN'))
+    slack_connection = WebClient(
+        os.environ.get('SLACK_BOT_TOKEN'), timeout=120)
     return slack_connection
 
 
