@@ -6,6 +6,7 @@ import glob
 import re
 import urllib.parse
 import sys
+from datetime import datetime
 from zipfile import ZipFile
 
 EXIT_CODE_INCORRECT_PARAM = 200
@@ -75,6 +76,12 @@ def get_args():
         dest='slack_token',
         required=True)
 
+    parser.add_argument(
+            '--include-file-in-thread',
+            dest = 'include_file_in_thread',
+            default = 'yes',
+            required = False)
+
     args = parser.parse_args()
     if args.destination_type == 'channel' and not args.channel_name:
         parser.error('--destination-type channel requires --channel-name')
@@ -113,7 +120,7 @@ def connect_to_slack():
     return slack_connection
 
 
-def send_slack_message(slack_connection, message, channel_name, blocks):
+def send_slack_message(slack_connection:WebClient, message, channel_name, blocks):
     """
     Send a slack message to the channel of your choice.
     Channel should be provided without a #
@@ -470,53 +477,70 @@ def determine_file_to_upload(
 
 
 def send_slack_message_with_file(
-        slack_connection,
+        slack_connection:WebClient,
         message,
         channel,
         shipyard_link,
-        file_to_upload):
+        file_to_upload,
+        include_file_in_thread = True):
     """
     Sends an initial Slack message with the file upload status in progress.
     Attempts to upload the file. If successful, updates the first message with a download button.
     If unsuccessful, updates the message to let users know.
     """
-    message_with_file_status = message + \
-        '\n\n _(File is currently uploading...)_'
-    message_response = send_slack_message(
-        slack_connection,
-        message_with_file_status,
-        channel,
-        create_blocks(
-            message_with_file_status,
-            shipyard_link))
-    channel_id, timestamp = get_message_details(message_response)
-    file_response = upload_file_to_slack(
-        slack_connection,
-        file_name=file_to_upload,
-        channel_name=channel,
-        timestamp=timestamp)
-    if file_response:
-        download_link = get_file_download_details(file_response)
-        update_slack_message(
-            slack_connection,
-            message,
-            channel_id=channel_id,
-            blocks=create_blocks(
-                message,
-                download_link=download_link,
-                shipyard_link=shipyard_link),
-            timestamp=timestamp)
-    else:
+    # this is the backwards compatible way to send a message with a file
+    if include_file_in_thread:
         message_with_file_status = message + \
-            '\n\n _(File could not be uploaded. Check log for details)_'
-        update_slack_message(
+            '\n\n _(File is currently uploading...)_'
+        message_response = send_slack_message(
             slack_connection,
-            message,
-            channel_id=channel_id,
-            blocks=create_blocks(
+            message_with_file_status,
+            channel,
+            create_blocks(
                 message_with_file_status,
-                shipyard_link=shipyard_link),
+                shipyard_link))
+        channel_id, timestamp = get_message_details(message_response)
+        file_response = upload_file_to_slack(
+            slack_connection,
+            file_name=file_to_upload,
+            channel_name=channel,
             timestamp=timestamp)
+        if file_response:
+            download_link = get_file_download_details(file_response)
+            update_slack_message(
+                slack_connection,
+                message,
+                channel_id=channel_id,
+                blocks=create_blocks(
+                    message,
+                    download_link=download_link,
+                    shipyard_link=shipyard_link),
+                timestamp=timestamp)
+        else:
+            message_with_file_status = message + \
+                '\n\n _(File could not be uploaded. Check log for details)_'
+            update_slack_message(
+                slack_connection,
+                message,
+                channel_id=channel_id,
+                blocks=create_blocks(
+                    message_with_file_status,
+                    shipyard_link=shipyard_link),
+                timestamp=timestamp)
+
+    # this is the case where we want to send the file in the main part of the message
+    else:
+        # post initial message
+        message_response = slack_connection.chat_postMessage(channel = channel, text = message)
+        if message_response['ok']:
+            upload_response = slack_connection.files_upload(channels = channel, file = file_to_upload, filename = file_to_upload)
+            download_link = get_file_download_details(upload_response)
+            if upload_response['ok']:
+                print('Message with file upload posted successfully')
+            else:
+                print(f"File upload failed: {upload_response['error']}")
+        else:
+            print(f"Message posting failed: {message_response['error']}")
 
 
 def should_message_be_sent(
@@ -568,6 +592,7 @@ def main():
     source_file_name_match_type = args.source_file_name_match_type
 
     conditional_send = args.conditional_send
+    include_in_thread = True if args.include_file_in_thread == 'yes' else False
 
     if should_message_be_sent(
             conditional_send,
@@ -589,7 +614,7 @@ def main():
                     file_to_upload = determine_file_to_upload(
                         source_file_name_match_type, source_folder_name, source_file_name)
                     send_slack_message_with_file(
-                        slack_connection, message, user_id, shipyard_link, file_to_upload)
+                        slack_connection, message, user_id, shipyard_link, file_to_upload, include_file_in_thread= include_in_thread)
                 else:
                     send_slack_message(
                         slack_connection,
@@ -611,7 +636,8 @@ def main():
                     message,
                     channel_name,
                     shipyard_link,
-                    file_to_upload)
+                    file_to_upload,
+                    include_file_in_thread= include_in_thread)
             else:
                 message_response = send_slack_message(
                     slack_connection, message, channel_name, create_blocks(
